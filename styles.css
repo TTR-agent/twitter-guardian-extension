@@ -1,0 +1,95 @@
+/* Twitter Guardian Extension Styles */
+
+/* Spam tweet styling */
+.twitter-guardian-spam {
+    border: 2px solid #ff4444 !important;
+    opacity: 0.3 !important;
+    position: relative !important;
+}
+
+/* Spam warning badge */
+.twitter-guardian-warning {
+    position: absolute !important;
+    top: 10px !important;
+    right: 10px !important;
+    background: #ff4444 !important;
+    color: white !important;
+    padding: 4px 8px !important;
+    border-radius: 4px !important;
+    font-size: 12px !important;
+    font-weight: bold !important;
+    z-index: 1000 !important;
+    font-family: Inter, -apple-system, BlinkMacSystemFont, sans-serif !important;
+}
+
+/* High-value account protection indicator */
+.twitter-guardian-protected {
+    border: 2px solid #2E9B6E !important;
+}
+
+.twitter-guardian-protected::after {
+    content: '🛡️ PROTECTED';
+    position: absolute !important;
+    top: 10px !important;
+    right: 10px !important;
+    background: #2E9B6E !important;
+    color: white !important;
+    padding: 4px 8px !important;
+    border-radius: 4px !important;
+    font-size: 12px !important;
+    font-weight: bold !important;
+    z-index: 1000 !important;
+}
+
+/* Control panel styling */
+#twitter-guardian-panel {
+    font-family: Inter, -apple-system, BlinkMacSystemFont, sans-serif !important;
+    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3) !important;
+    backdrop-filter: blur(10px) !important;
+    border: 1px solid rgba(255, 204, 0, 0.2) !important;
+}
+
+#twitter-guardian-panel button:hover {
+    opacity: 0.8 !important;
+    transform: translateY(-1px) !important;
+    transition: all 0.2s ease !important;
+}
+
+/* Timeline filter animations */
+.twitter-guardian-hiding {
+    animation: guardianFadeOut 1s ease-out forwards !important;
+}
+
+@keyframes guardianFadeOut {
+    0% { opacity: 1; transform: scale(1); }
+    50% { opacity: 0.5; transform: scale(0.98); }
+    100% { opacity: 0; transform: scale(0.95); height: 0; margin: 0; padding: 0; }
+}
+
+/* Status indicators */
+.twitter-guardian-status {
+    display: inline-block !important;
+    width: 8px !important;
+    height: 8px !important;
+    border-radius: 50% !important;
+    margin-right: 5px !important;
+}
+
+.twitter-guardian-status.active {
+    background: #2E9B6E !important;
+    animation: pulse 2s infinite !important;
+}
+
+.twitter-guardian-status.blocking {
+    background: #ff4444 !important;
+}
+
+.twitter-guardian-status.analyzing {
+    background: #FFCC00 !important;
+}
+
+@keyframes pulse {
+    0% { box-shadow: 0 0 0 0 rgba(46, 155, 110, 0.7); }
+    70% { box-shadow: 0 0 0 6px rgba(46, 155, 110, 0); }
+    100% { box-shadow: 0 0 0 0 rgba(46, 155, 110, 0); }
+}

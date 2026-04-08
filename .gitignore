@@ -1,0 +1,22 @@
+# OS
+.DS_Store
+Thumbs.db
+
+# Editor
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Build / packaging artifacts
+*.zip
+*.crx
+*.pem
+
+# Key files — never commit extension signing keys
+key.pem
+*.key
+
+# Local dev notes
+TODO.local.md
+notes.md

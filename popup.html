@@ -1,0 +1,173 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <style>
+        body {
+            width: 320px;
+            padding: 16px;
+            background: #141519;
+            color: #ECE9E1;
+            font-family: Inter, -apple-system, BlinkMacSystemFont, sans-serif;
+            margin: 0;
+        }
+        .header { text-align: center; margin-bottom: 14px; }
+        .title { color: #FFCC00; font-size: 18px; font-weight: bold; margin-bottom: 4px; }
+        .subtitle { color: #A7A39A; font-size: 12px; }
+
+        .stats {
+            background: #2F3E56;
+            padding: 12px;
+            border-radius: 8px;
+            margin-bottom: 12px;
+        }
+        .stat-row {
+            display: flex;
+            justify-content: space-between;
+            margin-bottom: 6px;
+            font-size: 13px;
+        }
+        .stat-row:last-child { margin-bottom: 0; }
+        .stat-value { color: #FFCC00; font-weight: bold; }
+
+        .actions {
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+            margin-bottom: 12px;
+        }
+        button {
+            padding: 10px;
+            border: none;
+            border-radius: 6px;
+            font-weight: bold;
+            cursor: pointer;
+            transition: all 0.15s ease;
+            font-size: 13px;
+        }
+        .primary-btn { background: #FFCC00; color: #141519; }
+        .secondary-btn { background: #2F3E56; color: #ECE9E1; }
+        button:hover { opacity: 0.85; }
+
+        .status {
+            text-align: center;
+            padding: 8px;
+            border-radius: 6px;
+            font-size: 12px;
+            margin-bottom: 12px;
+        }
+        .status.active { background: rgba(46, 155, 110, 0.2); color: #2E9B6E; }
+        .status.inactive { background: rgba(167, 163, 154, 0.2); color: #A7A39A; }
+
+        /* Collapsible sections */
+        details {
+            background: rgba(47, 62, 86, 0.45);
+            border-radius: 6px;
+            padding: 8px 10px;
+            margin-bottom: 10px;
+        }
+        details summary {
+            cursor: pointer;
+            font-size: 13px;
+            font-weight: bold;
+            color: #FFCC00;
+            outline: none;
+            list-style: none;
+        }
+        details summary::-webkit-details-marker { display: none; }
+        details summary::before { content: '▶ '; font-size: 10px; }
+        details[open] summary::before { content: '▼ '; }
+        details .body { margin-top: 8px; }
+
+        textarea {
+            width: 100%;
+            box-sizing: border-box;
+            min-height: 70px;
+            background: #0e0f13;
+            color: #ECE9E1;
+            border: 1px solid #2F3E56;
+            border-radius: 4px;
+            padding: 6px 8px;
+            font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+            font-size: 12px;
+            resize: vertical;
+        }
+        .hint {
+            font-size: 10px;
+            color: #A7A39A;
+            margin: 4px 0 6px;
+        }
+        .missed-list {
+            max-height: 150px;
+            overflow-y: auto;
+            background: #0e0f13;
+            border: 1px solid #2F3E56;
+            border-radius: 4px;
+            padding: 6px 8px;
+            font-size: 11px;
+            color: #C9C4B8;
+        }
+        .missed-list .item {
+            padding: 4px 0;
+            border-bottom: 1px solid rgba(255,255,255,0.06);
+        }
+        .missed-list .item:last-child { border-bottom: none; }
+        .missed-list .empty { color: #A7A39A; font-style: italic; }
+
+        .security-note {
+            font-size: 10px;
+            color: #A7A39A;
+            text-align: center;
+            padding: 6px;
+            background: rgba(47, 62, 86, 0.3);
+            border-radius: 4px;
+            margin-top: 6px;
+        }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <div class="title">🛡️ Twitter Guardian</div>
+        <div class="subtitle">Rage-bait & engagement-bait filter</div>
+    </div>
+
+    <div class="stats">
+        <div class="stat-row"><span>📊 Analyzed:</span><span class="stat-value" id="analyzed-count">0</span></div>
+        <div class="stat-row"><span>🚩 Flagged:</span><span class="stat-value" id="spam-count">0</span></div>
+        <div class="stat-row"><span>😑 Not Interested:</span><span class="stat-value" id="not-interested-count">0</span></div>
+        <div class="stat-row"><span>📝 You Missed:</span><span class="stat-value" id="missed-count">0</span></div>
+        <div class="stat-row"><span>✅ Allowlisted:</span><span class="stat-value" id="allowlist-size">0</span></div>
+        <div class="stat-row"><span>🧠 Training:</span><span class="stat-value" id="training-status">Active</span></div>
+    </div>
+
+    <div class="actions">
+        <button class="primary-btn" id="analyze-btn">Analyze Current Timeline</button>
+        <button class="secondary-btn" id="report-btn">View Performance Report</button>
+    </div>
+
+    <details>
+        <summary>✅ Trusted handles (allowlist)</summary>
+        <div class="body">
+            <div class="hint">One per line. These accounts are never filtered. With or without @.</div>
+            <textarea id="allowlist-input" placeholder="simonw&#10;karpathy&#10;danluu"></textarea>
+            <button class="primary-btn" id="save-allowlist-btn" style="margin-top:6px; width:100%;">Save allowlist</button>
+        </div>
+    </details>
+
+    <details>
+        <summary>📝 Tweets Guardian missed</summary>
+        <div class="body">
+            <div class="hint">Tweets you manually hit "Not interested" on that scored below the threshold. Use these to tune patterns.</div>
+            <div class="missed-list" id="missed-list"><div class="empty">None yet.</div></div>
+        </div>
+    </details>
+
+    <div class="status active" id="status">✅ Active on Twitter/X</div>
+
+    <div class="security-note">
+        🔒 All processing happens locally in your browser. No data is transmitted externally.
+    </div>
+
+    <script src="popup.js"></script>
+</body>
+</html>
