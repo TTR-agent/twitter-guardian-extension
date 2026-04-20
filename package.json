@@ -1,0 +1,28 @@
+{
+  "name": "tylerroessel",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "directories": {
+    "doc": "docs"
+  },
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/TTR-agent/opportunity-discovery-system.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "bugs": {
+    "url": "https://github.com/TTR-agent/opportunity-discovery-system/issues"
+  },
+  "homepage": "https://github.com/TTR-agent/opportunity-discovery-system#readme",
+  "dependencies": {
+    "dotenv": "^17.4.1",
+    "playwright": "^1.59.1"
+  }
+}

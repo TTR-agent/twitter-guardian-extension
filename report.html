@@ -200,6 +200,11 @@
         .export-btn:hover {
             opacity: 0.9;
         }
+
+        .danger-btn {
+            background: #b84b4b;
+            color: #fff;
+        }
     </style>
 </head>
 <body>
@@ -214,27 +219,45 @@
     <!-- Key Metrics Overview -->
     <div class="metrics-grid">
         <div class="metric-card">
-            <div class="metric-title">Total Spam Filtered</div>
+            <div class="metric-title">Spam Detected</div>
             <div class="metric-value" id="total-spam">0</div>
-            <div class="metric-subtitle">Tweets cleaned from timeline</div>
+            <div class="metric-subtitle">Tweets flagged as likely spam</div>
         </div>
 
         <div class="metric-card">
-            <div class="metric-title">Algorithm Trained</div>
-            <div class="metric-value" id="total-trained">0</div>
-            <div class="metric-subtitle">Times Twitter AI was taught</div>
+            <div class="metric-title">Hidden From Feed</div>
+            <div class="metric-value" id="total-hidden">0</div>
+            <div class="metric-subtitle">Posts actually hidden from your timeline</div>
         </div>
 
         <div class="metric-card">
             <div class="metric-title">Time Saved</div>
             <div class="metric-value" id="time-saved">0</div>
-            <div class="metric-subtitle">Minutes not spent on spam</div>
+            <div class="metric-subtitle">Estimated attention saved from actions taken</div>
         </div>
 
         <div class="metric-card">
             <div class="metric-title">Experience Score</div>
             <div class="metric-value" id="experience-score">--</div>
             <div class="metric-subtitle">Quality improvement rating</div>
+        </div>
+
+        <div class="metric-card">
+            <div class="metric-title">Filter Mode</div>
+            <div class="metric-value" id="metric-filter-mode">Balanced</div>
+            <div class="metric-subtitle">Current aggressiveness setting</div>
+        </div>
+
+        <div class="metric-card">
+            <div class="metric-title">X Actions Attempted</div>
+            <div class="metric-value" id="total-action-attempts">0</div>
+            <div class="metric-subtitle">Times Guardian tried to tune X directly</div>
+        </div>
+
+        <div class="metric-card">
+            <div class="metric-title">X Action Failures</div>
+            <div class="metric-value" id="total-action-failures">0</div>
+            <div class="metric-subtitle">Attempts that failed in the X UI flow</div>
         </div>
     </div>
 
@@ -243,9 +266,9 @@
         <div class="section-title">📈 Return on Investment Analysis</div>
 
         <div class="improvement-highlight">
-            <strong>🎯 Your Twitter experience is <span id="improvement-percentage">calculating...</span> cleaner</strong>
+            <strong>🎯 Hid <span id="improvement-percentage">calculating...</span> of detected spam from your feed</strong>
             <br>
-            <span style="color: #A7A39A;">Based on spam filtering effectiveness and algorithm training results</span>
+            <span style="color: #A7A39A;">This is based on visible feed hiding, which is the user-facing outcome that matters most.</span>
         </div>
 
         <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 15px; margin-top: 20px;">
@@ -258,7 +281,7 @@
             </div>
 
             <div>
-                <div style="color: #A7A39A; font-size: 14px;">Algorithm Training Success</div>
+                <div style="color: #A7A39A; font-size: 14px;">X Action Success</div>
                 <div class="effectiveness-bar">
                     <div class="effectiveness-fill" id="training-success-bar"></div>
                 </div>
@@ -272,9 +295,9 @@
         <div class="section-title">📊 Timeline Improvement Trends</div>
 
         <div class="time-range">
-            <button class="time-button active" onclick="showTrend('7d')">Last 7 Days</button>
-            <button class="time-button" onclick="showTrend('30d')">Last 30 Days</button>
-            <button class="time-button" onclick="showTrend('all')">All Time</button>
+            <button class="time-button active" data-trend-range="7d">Last 7 Days</button>
+            <button class="time-button" data-trend-range="30d">Last 30 Days</button>
+            <button class="time-button" data-trend-range="all">All Time</button>
         </div>
 
         <div class="chart-container" id="trend-chart">
@@ -291,14 +314,22 @@
                 <span class="trend-positive" id="daily-spam-avg">Calculating...</span>
             </div>
             <div class="trend-item">
-                <span>Algorithm training frequency</span>
+                <span>X action reliability</span>
                 <span class="trend-positive" id="training-frequency">Calculating...</span>
             </div>
             <div class="trend-item">
-                <span>Timeline quality improvement</span>
+                <span>Hide effectiveness</span>
                 <span class="trend-positive" id="quality-improvement">Calculating...</span>
             </div>
         </div>
+    </div>
+
+    <div class="section">
+        <div class="section-title">🧭 Coaching</div>
+        <div style="color: #A7A39A; font-size: 13px; margin-bottom: 6px;">Current diagnosis</div>
+        <div id="coach-summary" style="margin-bottom: 14px;">Loading...</div>
+        <div style="color: #A7A39A; font-size: 13px; margin-bottom: 6px;">Next best fix</div>
+        <div id="coach-next-step">Loading...</div>
     </div>
 
     <!-- Detailed Analytics -->
@@ -331,18 +362,25 @@
                     <td class="status-active">Filtering</td>
                 </tr>
                 <tr>
-                    <td>"Not Interested" Actions</td>
-                    <td id="not-interested-today">-</td>
-                    <td id="not-interested-week">-</td>
-                    <td id="not-interested-month">-</td>
-                    <td class="status-active">Training</td>
+                    <td>Hidden From Feed</td>
+                    <td id="hidden-today">-</td>
+                    <td id="hidden-week">-</td>
+                    <td id="hidden-month">-</td>
+                    <td class="status-active">Visible Outcome</td>
                 </tr>
                 <tr>
-                    <td>Spam Reports Sent</td>
-                    <td id="spam-reports-today">-</td>
-                    <td id="spam-reports-week">-</td>
-                    <td id="spam-reports-month">-</td>
-                    <td class="status-active">Reporting</td>
+                    <td>X Actions Succeeded</td>
+                    <td id="actions-today">-</td>
+                    <td id="actions-week">-</td>
+                    <td id="actions-month">-</td>
+                    <td class="status-active">Platform Tuning</td>
+                </tr>
+                <tr>
+                    <td>X Action Failures</td>
+                    <td id="action-failures-today">-</td>
+                    <td id="action-failures-week">-</td>
+                    <td id="action-failures-month">-</td>
+                    <td class="status-inactive">Needs Attention</td>
                 </tr>
             </tbody>
         </table>
@@ -372,14 +410,20 @@
                 <div style="color: #A7A39A; margin-bottom: 10px;">Data Collection</div>
                 <div class="status-active">Local Only (Secure)</div>
             </div>
+
+            <div>
+                <div style="color: #A7A39A; margin-bottom: 10px;">Filter Mode</div>
+                <div id="filter-mode" class="status-active">Balanced</div>
+            </div>
         </div>
     </div>
 
     <!-- Export Options -->
     <div style="text-align: center; margin-top: 30px; padding: 20px; border-top: 1px solid #3a3a3a;">
-        <button class="export-btn" onclick="exportReport('pdf')">📄 Export PDF Report</button>
-        <button class="export-btn" onclick="exportReport('csv')">📊 Export CSV Data</button>
-        <button class="export-btn" onclick="refreshReport()">🔄 Refresh Data</button>
+        <button class="export-btn" id="export-pdf-btn" data-export-format="pdf">📄 Export PDF Report</button>
+        <button class="export-btn" id="export-csv-btn" data-export-format="csv">📊 Export CSV Data</button>
+        <button class="export-btn" id="refresh-report-btn">🔄 Refresh Data</button>
+        <button class="export-btn danger-btn" id="reset-report-btn">♻️ Reset Performance Data</button>
     </div>
 
     <script src="report.js"></script>

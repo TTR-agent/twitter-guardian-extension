@@ -2,347 +2,468 @@
 
 class TwitterGuardianReports {
     constructor() {
-        this.currentTimeRange = '7d';
         this.reportData = null;
         this.init();
     }
 
     async init() {
-        // Set report generation date
         document.getElementById('report-date').textContent = new Date().toLocaleDateString();
-
-        // Load data and generate report
-        await this.loadReportData();
-        this.generateReport();
-
-        // Auto-refresh every 30 seconds
+        this.bindUI();
+        await this.refreshReport();
         setInterval(() => this.refreshReport(), 30000);
     }
 
-    async loadReportData() {
-        try {
-            // Get data from background storage
-            const data = await this.getStorageData();
+    bindUI() {
+        document.querySelectorAll('[data-trend-range]').forEach((button) => {
+            button.addEventListener('click', () => {
+                showTrend(button.dataset.trendRange, button);
+            });
+        });
 
-            // Try to get current session data from active Twitter tab
-            const sessionData = await this.getCurrentSessionData();
+        document.querySelectorAll('[data-export-format]').forEach((button) => {
+            button.addEventListener('click', () => {
+                exportReport(button.dataset.exportFormat);
+            });
+        });
 
-            // Combine and process data
-            this.reportData = this.processAnalyticsData(data, sessionData);
+        const refreshButton = document.getElementById('refresh-report-btn');
+        if (refreshButton) {
+            refreshButton.addEventListener('click', () => refreshReport(refreshButton));
+        }
 
-        } catch (error) {
-            console.log('Report data loading error:', error);
-            this.reportData = this.getDefaultReportData();
+        const resetButton = document.getElementById('reset-report-btn');
+        if (resetButton) {
+            resetButton.addEventListener('click', () => resetPerformanceData(resetButton));
         }
     }
 
-    getStorageData() {
+    async getStorageData() {
         return new Promise((resolve) => {
-            chrome.storage.local.get(['guardianStats'], (result) => {
-                const stats = result.guardianStats || this.initializeAnalytics();
-                resolve(stats);
+            chrome.storage.local.get(['guardianStats', 'guardianSettings'], (result) => {
+                resolve({
+                    stats: result.guardianStats || this.getEmptyStats(),
+                    settings: result.guardianSettings || {}
+                });
             });
         });
     }
 
-    getCurrentSessionData() {
+    async getCurrentSessionData() {
         return new Promise((resolve) => {
-            chrome.tabs.query({url: ["*://x.com/*", "*://twitter.com/*"]}, (tabs) => {
-                if (tabs.length > 0) {
-                    chrome.tabs.sendMessage(tabs[0].id, {action: 'getStats'}, (response) => {
-                        resolve(response || {});
-                    });
-                } else {
-                    resolve({});
+            chrome.tabs.query({ url: ["*://x.com/*", "*://twitter.com/*"] }, (tabs) => {
+                if (tabs.length === 0) {
+                    resolve({ activeTabPresent: false });
+                    return;
                 }
+
+                chrome.tabs.sendMessage(tabs[0].id, { action: 'getStats' }, (response) => {
+                    resolve({
+                        ...(response || {}),
+                        activeTabPresent: true
+                    });
+                });
             });
         });
     }
 
-    initializeAnalytics() {
-        return {
-            startDate: new Date().toISOString(),
-            dailyStats: {},
-            weeklyStats: {},
-            monthlyStats: {},
-            totalStats: {
-                analyzed: 0,
-                spam: 0,
-                notInterested: 0,
-                markedSpam: 0,
-                timesSaved: 0
-            },
-            trends: [],
-            lastUpdated: new Date().toISOString()
-        };
-    }
-
-    processAnalyticsData(storedData, sessionData) {
-        const today = new Date().toISOString().split('T')[0];
-
-        // Merge session data with stored data
-        const totalAnalyzed = (storedData.totalStats?.analyzed || 0) + (sessionData.analyzed || 0);
-        const totalSpam = (storedData.totalStats?.spam || 0) + (sessionData.spam || 0);
-        const totalNotInterested = (storedData.totalStats?.notInterested || 0) + (sessionData.notInterested || 0);
-        const totalMarkedSpam = (storedData.totalStats?.markedSpam || 0) + (sessionData.markedSpam || 0);
-
-        // Calculate metrics
-        const totalFiltered = totalNotInterested + totalMarkedSpam;
-        const timeSavedMinutes = this.calculateTimeSaved(totalFiltered);
-        const experienceScore = this.calculateExperienceScore(totalAnalyzed, totalSpam, totalFiltered);
-        const detectionRate = totalAnalyzed > 0 ? (totalSpam / totalAnalyzed * 100).toFixed(1) : 0;
-        const trainingSuccess = totalSpam > 0 ? (totalFiltered / totalSpam * 100).toFixed(1) : 0;
-
-        return {
-            totalAnalyzed,
-            totalSpam,
-            totalNotInterested,
-            totalMarkedSpam,
-            totalFiltered,
-            timeSavedMinutes,
-            experienceScore,
-            detectionRate,
-            trainingSuccess,
-            improvementPercentage: this.calculateImprovementPercentage(totalSpam, totalFiltered),
-            dailyAverage: this.calculateDailyAverage(storedData),
-            trainingFrequency: this.calculateTrainingFrequency(totalFiltered, storedData.startDate),
-            qualityImprovement: this.calculateQualityImprovement(totalAnalyzed, totalSpam),
-            isActive: sessionData.algorithmTraining !== undefined
-        };
-    }
-
-    calculateTimeSaved(filteredCount) {
-        // Assume average of 3 seconds per spam tweet avoided
-        return Math.round(filteredCount * 0.05); // 3 seconds = 0.05 minutes
-    }
-
-    calculateExperienceScore(analyzed, spam, filtered) {
-        if (analyzed === 0) return 'A+';
-
-        const spamRate = spam / analyzed;
-        const filterRate = spam > 0 ? filtered / spam : 1;
-
-        // Score based on low spam rate and high filter effectiveness
-        const score = (1 - spamRate) * 50 + filterRate * 50;
-
-        if (score >= 90) return 'A+';
-        if (score >= 80) return 'A';
-        if (score >= 70) return 'B+';
-        if (score >= 60) return 'B';
-        return 'C';
-    }
-
-    calculateImprovementPercentage(totalSpam, totalFiltered) {
-        if (totalSpam === 0) return 0;
-        return Math.round((totalFiltered / totalSpam) * 100);
-    }
-
-    calculateDailyAverage(storedData) {
-        const daysSinceStart = Math.max(1,
-            Math.ceil((Date.now() - new Date(storedData.startDate)) / (1000 * 60 * 60 * 24))
-        );
-        return Math.round((storedData.totalStats?.spam || 0) / daysSinceStart * 10) / 10;
-    }
-
-    calculateTrainingFrequency(totalFiltered, startDate) {
-        const daysSinceStart = Math.max(1,
-            Math.ceil((Date.now() - new Date(startDate)) / (1000 * 60 * 60 * 24))
-        );
-        const frequency = totalFiltered / daysSinceStart;
-
-        if (frequency >= 10) return 'Very High';
-        if (frequency >= 5) return 'High';
-        if (frequency >= 2) return 'Moderate';
-        if (frequency >= 0.5) return 'Low';
-        return 'Just Started';
-    }
-
-    calculateQualityImprovement(analyzed, spam) {
-        if (analyzed === 0) return 'No data yet';
-
-        const cleanRate = ((analyzed - spam) / analyzed * 100).toFixed(1);
-        return `${cleanRate}% clean content`;
-    }
-
-    getDefaultReportData() {
+    getEmptyStats() {
         return {
             totalAnalyzed: 0,
             totalSpam: 0,
             totalNotInterested: 0,
             totalMarkedSpam: 0,
-            totalFiltered: 0,
-            timeSavedMinutes: 0,
-            experienceScore: '--',
-            detectionRate: 0,
-            trainingSuccess: 0,
-            improvementPercentage: 0,
-            dailyAverage: 0,
-            trainingFrequency: 'Starting up',
-            qualityImprovement: 'Collecting data...',
-            isActive: false
+            totalBlocked: 0,
+            totalUnfollowed: 0,
+            totalActionAttempts: 0,
+            totalActionFailures: 0,
+            totalLocallyHidden: 0,
+            lastRun: null,
+            startDate: new Date().toISOString(),
+            dailyStats: {}
         };
+    }
+
+    getEmptyWindow() {
+        return {
+            analyzed: 0,
+            spam: 0,
+            notInterested: 0,
+            markedSpam: 0,
+            blocked: 0,
+            unfollowed: 0,
+            actionAttempts: 0,
+            actionFailures: 0,
+            locallyHidden: 0
+        };
+    }
+
+    addWindow(target, source) {
+        Object.keys(target).forEach((key) => {
+            target[key] += Number(source[key] || 0);
+        });
+    }
+
+    summarizeDailyStats(dailyStats) {
+        const summary = {
+            today: this.getEmptyWindow(),
+            week: this.getEmptyWindow(),
+            month: this.getEmptyWindow()
+        };
+
+        const now = new Date();
+        const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+        const weekStart = new Date(todayStart);
+        weekStart.setDate(todayStart.getDate() - 6);
+        const monthStart = new Date(todayStart);
+        monthStart.setDate(todayStart.getDate() - 29);
+
+        Object.entries(dailyStats || {}).forEach(([dateKey, values]) => {
+            const date = new Date(`${dateKey}T00:00:00`);
+            if (Number.isNaN(date.getTime())) return;
+
+            if (date >= todayStart) this.addWindow(summary.today, values);
+            if (date >= weekStart) this.addWindow(summary.week, values);
+            if (date >= monthStart) this.addWindow(summary.month, values);
+        });
+
+        return summary;
+    }
+
+    calculateTimeSavedText(hiddenCount) {
+        const secondsSaved = hiddenCount * 3;
+        if (secondsSaved < 60) return `${secondsSaved}s`;
+        const minutes = secondsSaved / 60;
+        if (minutes < 10) return `${minutes.toFixed(1)}m`;
+        return `${Math.round(minutes)}m`;
+    }
+
+    calculateExperienceScore(detectionRate, hideRate, actionSuccessRate) {
+        const score = detectionRate * 0.2 + hideRate * 0.5 + actionSuccessRate * 0.3;
+        if (score >= 85) return 'A';
+        if (score >= 70) return 'B';
+        if (score >= 55) return 'C';
+        if (score >= 40) return 'D';
+        return 'F';
+    }
+
+    calculateDailyDetectionAverage(totalSpam, startDate) {
+        const daysSinceStart = Math.max(
+            1,
+            Math.ceil((Date.now() - new Date(startDate).getTime()) / (1000 * 60 * 60 * 24))
+        );
+        return Math.round((totalSpam / daysSinceStart) * 10) / 10;
+    }
+
+    buildCoaching(data) {
+        if (data.totalSpam === 0) {
+            return {
+                summary: 'Guardian has not detected enough spam yet to coach meaningfully.',
+                nextStep: 'Scroll your feed and run another analysis so we can collect a real sample.'
+            };
+        }
+
+        if (data.hideRate < 50) {
+            return {
+                summary: 'Detection is ahead of hiding right now.',
+                nextStep: 'Focus on durable local hiding and the X action pipeline, because too many detected posts are still staying visible.'
+            };
+        }
+
+        if (data.actionAttempts > 0 && data.actionSuccessRate < 50) {
+            return {
+                summary: 'Local hiding is working better than Twitter-side actions.',
+                nextStep: 'Keep hiding posts immediately, but keep debugging the “Not interested” menu flow because X is dropping too many action attempts.'
+            };
+        }
+
+        if (data.detectionRate < 8) {
+            return {
+                summary: 'The detector is still conservative relative to your feed.',
+                nextStep: 'Tune more reply-bait and complaint-thread patterns, especially for repetitive low-value engagement posts.'
+            };
+        }
+
+        return {
+            summary: 'The pipeline is in a healthier state: detection, hiding, and actions are lining up better.',
+            nextStep: 'Keep reviewing missed tweets to tighten patterns without over-hiding trusted accounts.'
+        };
+    }
+
+    processReportData(storageData, sessionData) {
+        const stats = { ...this.getEmptyStats(), ...(storageData.stats || {}) };
+        const actionSummary = this.summarizeDailyStats(stats.dailyStats || {});
+
+        const totalDetected = Number(stats.totalSpam || 0);
+        const totalHidden = Number(stats.totalLocallyHidden || 0);
+        const actionSuccesses = Number(stats.totalNotInterested || 0) + Number(stats.totalMarkedSpam || 0);
+        const actionAttempts = Number(stats.totalActionAttempts || 0);
+        const actionFailures = Number(stats.totalActionFailures || 0);
+        const detectionRate = stats.totalAnalyzed > 0 ? (totalDetected / stats.totalAnalyzed) * 100 : 0;
+        const hideRate = totalDetected > 0 ? (totalHidden / totalDetected) * 100 : 0;
+        const actionSuccessRate = actionAttempts > 0 ? (actionSuccesses / actionAttempts) * 100 : 0;
+        const coaching = this.buildCoaching({
+            totalSpam: totalDetected,
+            detectionRate,
+            hideRate,
+            actionAttempts,
+            actionSuccessRate
+        });
+
+        return {
+            totalAnalyzed: Number(stats.totalAnalyzed || 0),
+            totalDetected,
+            totalHidden,
+            totalBlocked: Number(stats.totalBlocked || 0),
+            totalUnfollowed: Number(stats.totalUnfollowed || 0),
+            actionSuccesses,
+            actionAttempts,
+            actionFailures,
+            detectionRate,
+            hideRate,
+            actionSuccessRate,
+            experienceScore: this.calculateExperienceScore(detectionRate, hideRate, actionSuccessRate),
+            timeSavedText: this.calculateTimeSavedText(totalHidden),
+            dailyDetectionAverage: this.calculateDailyDetectionAverage(totalDetected, stats.startDate),
+            qualityImprovement: `${Math.round(hideRate)}% of detected spam hidden`,
+            actionReliability: actionAttempts > 0 ? `${Math.round(actionSuccessRate)}% successful` : 'No attempts yet',
+            coaching,
+            filterMode: storageData.settings?.filterMode === 'strict' ? 'Strict' : 'Balanced',
+            isActive: Boolean(sessionData.activeTabPresent),
+            algorithmTrainingEnabled: sessionData.algorithmTraining !== false,
+            lastActivityText: stats.lastRun ? this.formatRelativeTime(stats.lastRun) : 'No recent activity',
+            actionSummary
+        };
+    }
+
+    formatRelativeTime(timestamp) {
+        const diffMs = Date.now() - new Date(timestamp).getTime();
+        if (Number.isNaN(diffMs)) return 'No recent activity';
+        const diffMinutes = Math.floor(diffMs / 60000);
+        if (diffMinutes < 1) return 'Just now';
+        if (diffMinutes < 60) return `${diffMinutes} min ago`;
+        const diffHours = Math.floor(diffMinutes / 60);
+        if (diffHours < 24) return `${diffHours} hr ago`;
+        const diffDays = Math.floor(diffHours / 24);
+        return `${diffDays} day${diffDays === 1 ? '' : 's'} ago`;
     }
 
     generateReport() {
         if (!this.reportData) return;
 
-        // Update key metrics
-        document.getElementById('total-spam').textContent = this.reportData.totalSpam.toLocaleString();
-        document.getElementById('total-trained').textContent = this.reportData.totalFiltered.toLocaleString();
-        document.getElementById('time-saved').textContent = this.reportData.timeSavedMinutes.toLocaleString();
+        document.getElementById('total-spam').textContent = this.reportData.totalDetected.toLocaleString();
+        document.getElementById('total-hidden').textContent = this.reportData.totalHidden.toLocaleString();
+        document.getElementById('time-saved').textContent = this.reportData.timeSavedText;
         document.getElementById('experience-score').textContent = this.reportData.experienceScore;
+        document.getElementById('metric-filter-mode').textContent = this.reportData.filterMode;
+        document.getElementById('total-action-attempts').textContent = this.reportData.actionAttempts.toLocaleString();
+        document.getElementById('total-action-failures').textContent = this.reportData.actionFailures.toLocaleString();
 
-        // Update ROI analysis
-        document.getElementById('improvement-percentage').textContent =
-            `${this.reportData.improvementPercentage}%`;
+        document.getElementById('improvement-percentage').textContent = `${Math.round(this.reportData.hideRate)}%`;
+        this.updateEffectivenessBar(
+            'detection-rate-bar',
+            'detection-rate-text',
+            this.reportData.detectionRate,
+            `${this.reportData.detectionRate.toFixed(1)}% of tweets`
+        );
+        this.updateEffectivenessBar(
+            'training-success-bar',
+            'training-success-text',
+            this.reportData.actionSuccessRate,
+            this.reportData.actionAttempts > 0
+                ? `${this.reportData.actionSuccessRate.toFixed(1)}% of X actions succeeded`
+                : 'No X actions attempted yet'
+        );
 
-        // Update effectiveness bars
-        this.updateEffectivenessBar('detection-rate-bar', 'detection-rate-text',
-            this.reportData.detectionRate, `${this.reportData.detectionRate}% of tweets`);
+        document.getElementById('daily-spam-avg').textContent = `${this.reportData.dailyDetectionAverage} per day`;
+        document.getElementById('training-frequency').textContent = this.reportData.actionReliability;
+        document.getElementById('quality-improvement').textContent = this.reportData.qualityImprovement;
+        document.getElementById('coach-summary').textContent = this.reportData.coaching.summary;
+        document.getElementById('coach-next-step').textContent = this.reportData.coaching.nextStep;
 
-        this.updateEffectivenessBar('training-success-bar', 'training-success-text',
-            this.reportData.trainingSuccess, `${this.reportData.trainingSuccess}% trained`);
-
-        // Update trends
-        document.getElementById('daily-spam-avg').textContent =
-            `${this.reportData.dailyAverage} per day`;
-        document.getElementById('training-frequency').textContent =
-            this.reportData.trainingFrequency;
-        document.getElementById('quality-improvement').textContent =
-            this.reportData.qualityImprovement;
-
-        // Update analytics table
         this.updateAnalyticsTable();
 
-        // Update system health
         document.getElementById('extension-status').textContent =
-            this.reportData.isActive ? 'Active & Monitoring' : 'Inactive';
+            this.reportData.isActive ? 'Active on an X tab' : 'No active X tab';
         document.getElementById('extension-status').className =
             this.reportData.isActive ? 'status-active' : 'status-inactive';
 
         document.getElementById('algorithm-training-status').textContent =
-            this.reportData.isActive ? 'Enabled' : 'Disabled';
+            this.reportData.algorithmTrainingEnabled ? 'Enabled' : 'Disabled';
         document.getElementById('algorithm-training-status').className =
-            this.reportData.isActive ? 'status-active' : 'status-inactive';
+            this.reportData.algorithmTrainingEnabled ? 'status-active' : 'status-inactive';
 
-        document.getElementById('last-activity').textContent =
-            this.reportData.isActive ? 'Just now' : 'No recent activity';
+        document.getElementById('last-activity').textContent = this.reportData.lastActivityText;
+        document.getElementById('filter-mode').textContent = this.reportData.filterMode;
+    }
+
+    updateAnalyticsTable() {
+        const { today, week, month } = this.reportData.actionSummary;
+
+        document.getElementById('analyzed-today').textContent = today.analyzed || 0;
+        document.getElementById('analyzed-week').textContent = week.analyzed || 0;
+        document.getElementById('analyzed-month').textContent = month.analyzed || 0;
+
+        document.getElementById('spam-today').textContent = today.spam || 0;
+        document.getElementById('spam-week').textContent = week.spam || 0;
+        document.getElementById('spam-month').textContent = month.spam || 0;
+
+        document.getElementById('hidden-today').textContent = today.locallyHidden || 0;
+        document.getElementById('hidden-week').textContent = week.locallyHidden || 0;
+        document.getElementById('hidden-month').textContent = month.locallyHidden || 0;
+
+        const todayActionSuccesses = (today.notInterested || 0) + (today.markedSpam || 0);
+        const weekActionSuccesses = (week.notInterested || 0) + (week.markedSpam || 0);
+        const monthActionSuccesses = (month.notInterested || 0) + (month.markedSpam || 0);
+        document.getElementById('actions-today').textContent = todayActionSuccesses;
+        document.getElementById('actions-week').textContent = weekActionSuccesses;
+        document.getElementById('actions-month').textContent = monthActionSuccesses;
+
+        document.getElementById('action-failures-today').textContent = today.actionFailures || 0;
+        document.getElementById('action-failures-week').textContent = week.actionFailures || 0;
+        document.getElementById('action-failures-month').textContent = month.actionFailures || 0;
     }
 
     updateEffectivenessBar(barId, textId, percentage, text) {
         const bar = document.getElementById(barId);
         const textEl = document.getElementById(textId);
+        if (!bar || !textEl) return;
 
-        if (bar && textEl) {
-            bar.style.width = Math.min(100, Math.max(0, percentage)) + '%';
-            textEl.textContent = text;
-        }
+        bar.style.width = `${Math.min(100, Math.max(0, percentage))}%`;
+        textEl.textContent = text;
     }
 
-    updateAnalyticsTable() {
-        // For now, show current session data
-        // In a full implementation, this would show time-segmented data
-
-        const sessionData = this.reportData;
-
-        // Update today's data (current session)
-        document.getElementById('analyzed-today').textContent = sessionData.totalAnalyzed || 0;
-        document.getElementById('spam-today').textContent = sessionData.totalSpam || 0;
-        document.getElementById('not-interested-today').textContent = sessionData.totalNotInterested || 0;
-        document.getElementById('spam-reports-today').textContent = sessionData.totalMarkedSpam || 0;
-
-        // For week/month, show totals (would be calculated from historical data)
-        document.getElementById('analyzed-week').textContent = sessionData.totalAnalyzed || 0;
-        document.getElementById('spam-week').textContent = sessionData.totalSpam || 0;
-        document.getElementById('not-interested-week').textContent = sessionData.totalNotInterested || 0;
-        document.getElementById('spam-reports-week').textContent = sessionData.totalMarkedSpam || 0;
-
-        document.getElementById('analyzed-month').textContent = sessionData.totalAnalyzed || 0;
-        document.getElementById('spam-month').textContent = sessionData.totalSpam || 0;
-        document.getElementById('not-interested-month').textContent = sessionData.totalNotInterested || 0;
-        document.getElementById('spam-reports-month').textContent = sessionData.totalMarkedSpam || 0;
+    async refreshReport() {
+        const storageData = await this.getStorageData();
+        const sessionData = await this.getCurrentSessionData();
+        this.reportData = this.processReportData(storageData, sessionData);
+        this.generateReport();
     }
 
-    async saveAnalyticsData() {
-        if (!this.reportData) return;
+    async resetPerformanceData() {
+        const freshStats = this.getEmptyStats();
 
-        const today = new Date().toISOString().split('T')[0];
+        await new Promise((resolve) => {
+            chrome.storage.local.set({
+                guardianStats: freshStats,
+                guardianAnalytics: {
+                    startDate: freshStats.startDate,
+                    dailyStats: {},
+                    weeklyStats: {},
+                    monthlyStats: {},
+                    totalStats: {
+                        analyzed: 0,
+                        spam: 0,
+                        notInterested: 0,
+                        markedSpam: 0,
+                        timesSaved: 0
+                    },
+                    trends: [],
+                    lastUpdated: new Date().toISOString()
+                },
+                guardianActionLog: [],
+                guardianMissedClicks: [],
+                guardianAnalyzedTweetIds: [],
+                guardianHiddenTweetIds: []
+            }, resolve);
+        });
 
-        const analyticsData = {
-            startDate: this.reportData.startDate || new Date().toISOString(),
-            totalStats: {
-                analyzed: this.reportData.totalAnalyzed,
-                spam: this.reportData.totalSpam,
-                notInterested: this.reportData.totalNotInterested,
-                markedSpam: this.reportData.totalMarkedSpam,
-                timesSaved: this.reportData.timeSavedMinutes
-            },
-            dailyStats: {
-                [today]: {
-                    analyzed: this.reportData.totalAnalyzed,
-                    spam: this.reportData.totalSpam,
-                    filtered: this.reportData.totalFiltered
+        await new Promise((resolve) => {
+            chrome.tabs.query({ url: ["*://x.com/*", "*://twitter.com/*"] }, (tabs) => {
+                if (!tabs.length) {
+                    resolve();
+                    return;
                 }
-            },
-            lastUpdated: new Date().toISOString()
-        };
 
-        chrome.storage.local.set({ guardianAnalytics: analyticsData });
+                let remaining = tabs.length;
+                const finish = () => {
+                    remaining -= 1;
+                    if (remaining <= 0) resolve();
+                };
+
+                tabs.forEach((tab) => {
+                    chrome.tabs.sendMessage(tab.id, { action: 'resetPerformanceState' }, () => {
+                        void chrome.runtime.lastError;
+                        finish();
+                    });
+                });
+            });
+        });
+
+        await this.refreshReport();
     }
 }
 
-// Global functions for UI interactions
-function showTrend(timeRange) {
-    // Update active button
+function showTrend(timeRange, buttonEl) {
     document.querySelectorAll('.time-button').forEach(btn => btn.classList.remove('active'));
-    event.target.classList.add('active');
+    if (buttonEl) buttonEl.classList.add('active');
 
-    // Update chart (placeholder for now)
-    const chartContainer = document.getElementById('trend-chart');
-    chartContainer.innerHTML = `
-        <div style="text-align: center; color: #A7A39A; margin-top: 60px;">
-            📈 ${timeRange === '7d' ? 'Last 7 Days' : timeRange === '30d' ? 'Last 30 Days' : 'All Time'} Trends
+    const title =
+        timeRange === '30d' ? 'Last 30 Days' :
+        timeRange === 'all' ? 'All Time' :
+        'Last 7 Days';
+
+    document.getElementById('trend-chart').innerHTML = `
+        <div style="text-align: center; color: #A7A39A; margin-top: 50px;">
+            📈 ${title}
             <br><br>
-            <span style="font-size: 12px;">Advanced charts will be available after more data is collected</span>
+            <span style="font-size: 12px;">Trend charts are not implemented yet.</span>
             <br><br>
-            <div style="color: #FFCC00;">
-                Coming soon: Interactive charts showing spam detection trends,
-                algorithm training effectiveness, and timeline quality improvements over time.
-            </div>
+            <span style="font-size: 12px;">Use the coaching section below for the current bottleneck.</span>
         </div>
     `;
 }
 
 function exportReport(format) {
     if (format === 'pdf') {
-        // In a full implementation, this would generate a PDF
-        alert('📄 PDF export feature coming soon! This will generate a comprehensive report with all your Twitter improvement metrics.');
-    } else if (format === 'csv') {
-        // In a full implementation, this would export CSV data
-        alert('📊 CSV export feature coming soon! This will provide raw data for your own analysis.');
+        alert('PDF export is not implemented yet.');
+        return;
+    }
+    if (format === 'csv') {
+        alert('CSV export is not implemented yet.');
     }
 }
 
-async function refreshReport() {
-    const refreshBtn = event.target;
-    const originalText = refreshBtn.textContent;
-
-    refreshBtn.textContent = '🔄 Refreshing...';
-    refreshBtn.disabled = true;
+async function refreshReport(refreshBtn) {
+    const originalText = refreshBtn?.textContent;
+    if (refreshBtn) {
+        refreshBtn.textContent = 'Refreshing...';
+        refreshBtn.disabled = true;
+    }
 
     try {
-        await window.reportManager.loadReportData();
-        window.reportManager.generateReport();
-        await window.reportManager.saveAnalyticsData();
-    } catch (error) {
-        console.log('Refresh error:', error);
+        await window.reportManager.refreshReport();
+    } finally {
+        if (refreshBtn) {
+            setTimeout(() => {
+                refreshBtn.textContent = originalText;
+                refreshBtn.disabled = false;
+            }, 800);
+        }
     }
-
-    setTimeout(() => {
-        refreshBtn.textContent = originalText;
-        refreshBtn.disabled = false;
-    }, 1000);
 }
 
-// Initialize the report manager
+async function resetPerformanceData(resetBtn) {
+    const confirmed = window.confirm(
+        'Reset Guardian performance history and reporting data? This keeps your settings and allowlist, but clears old metrics, action logs, hidden/analyzed tweet caches, and training stats.'
+    );
+    if (!confirmed) return;
+
+    const originalText = resetBtn?.textContent;
+    if (resetBtn) {
+        resetBtn.textContent = 'Resetting...';
+        resetBtn.disabled = true;
+    }
+
+    try {
+        await window.reportManager.resetPerformanceData();
+    } finally {
+        if (resetBtn) {
+            setTimeout(() => {
+                resetBtn.textContent = originalText;
+                resetBtn.disabled = false;
+            }, 800);
+        }
+    }
+}
+
 window.reportManager = new TwitterGuardianReports();

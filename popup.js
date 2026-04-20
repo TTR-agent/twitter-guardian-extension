@@ -2,12 +2,14 @@
 
 document.addEventListener('DOMContentLoaded', () => {
     loadStats();
+    loadFilterMode();
     loadAllowlist();
     loadMissedClicks();
 
     document.getElementById('analyze-btn').addEventListener('click', analyzeTimeline);
     document.getElementById('report-btn').addEventListener('click', openReport);
     document.getElementById('save-allowlist-btn').addEventListener('click', saveAllowlist);
+    document.getElementById('filter-mode-select').addEventListener('change', saveFilterMode);
 
     checkActiveStatus();
 });
@@ -24,24 +26,24 @@ function withActiveTwitterTab(cb) {
 }
 
 function loadStats() {
-    withActiveTwitterTab((tab) => {
-        if (!tab) {
-            document.getElementById('analyzed-count').textContent = '0';
-            document.getElementById('spam-count').textContent = '0';
-            document.getElementById('not-interested-count').textContent = '0';
-            document.getElementById('missed-count').textContent = '0';
-            document.getElementById('allowlist-size').textContent = '0';
-            document.getElementById('training-status').textContent = 'Inactive';
-            return;
-        }
-        chrome.tabs.sendMessage(tab.id, { action: 'getStats' }, (response) => {
-            if (chrome.runtime.lastError || !response) return;
-            document.getElementById('analyzed-count').textContent = response.analyzed || 0;
-            document.getElementById('spam-count').textContent = response.spam || 0;
-            document.getElementById('not-interested-count').textContent = response.notInterested || 0;
-            document.getElementById('missed-count').textContent = response.missedClicks || 0;
-            document.getElementById('allowlist-size').textContent = response.allowlistSize || 0;
-            document.getElementById('training-status').textContent = response.algorithmTraining ? 'Active' : 'Disabled';
+    chrome.storage.local.get(['guardianStats', 'guardianSettings', 'guardianAllowlist', 'guardianMissedClicks'], (data) => {
+        const stats = data.guardianStats || {};
+        document.getElementById('analyzed-count').textContent = stats.totalAnalyzed || 0;
+        document.getElementById('spam-count').textContent = stats.totalSpam || 0;
+        document.getElementById('not-interested-count').textContent = stats.totalNotInterested || 0;
+        document.getElementById('missed-count').textContent = (data.guardianMissedClicks || []).length;
+        document.getElementById('allowlist-size').textContent = (data.guardianAllowlist || []).length;
+        document.getElementById('training-status').textContent = stats.lastRun ? 'Background data' : 'Inactive';
+        document.getElementById('filter-mode-select').value =
+            data.guardianSettings?.filterMode === 'strict' ? 'strict' : 'balanced';
+
+        withActiveTwitterTab((tab) => {
+            if (!tab) return;
+            chrome.tabs.sendMessage(tab.id, { action: 'getStats' }, (response) => {
+                if (chrome.runtime.lastError || !response) return;
+                document.getElementById('training-status').textContent = response.algorithmTraining ? 'Active' : 'Disabled';
+                document.getElementById('filter-mode-select').value = response.filterMode || 'balanced';
+            });
         });
     });
 }
@@ -62,6 +64,33 @@ function analyzeTimeline() {
 
 function openReport() {
     chrome.tabs.create({ url: chrome.runtime.getURL('report.html') });
+}
+
+function loadFilterMode() {
+    chrome.storage.local.get(['guardianSettings'], (data) => {
+        document.getElementById('filter-mode-select').value =
+            data.guardianSettings?.filterMode === 'strict' ? 'strict' : 'balanced';
+    });
+}
+
+function saveFilterMode() {
+    const mode = document.getElementById('filter-mode-select').value === 'strict' ? 'strict' : 'balanced';
+
+    chrome.storage.local.get(['guardianSettings'], (data) => {
+        const current = data.guardianSettings || {};
+        chrome.storage.local.set({
+            guardianSettings: {
+                ...current,
+                filterMode: mode
+            }
+        });
+    });
+
+    withActiveTwitterTab((tab) => {
+        if (tab) {
+            chrome.tabs.sendMessage(tab.id, { action: 'setFilterMode', mode });
+        }
+    });
 }
 
 function loadAllowlist() {

@@ -97,6 +97,28 @@
             color: #A7A39A;
             margin: 4px 0 6px;
         }
+        .mode-control {
+            background: rgba(47, 62, 86, 0.45);
+            border-radius: 6px;
+            padding: 10px;
+            margin-bottom: 10px;
+        }
+        .mode-label {
+            font-size: 12px;
+            font-weight: bold;
+            color: #FFCC00;
+            margin-bottom: 6px;
+        }
+        .mode-select {
+            width: 100%;
+            box-sizing: border-box;
+            background: #0e0f13;
+            color: #ECE9E1;
+            border: 1px solid #2F3E56;
+            border-radius: 4px;
+            padding: 8px;
+            font-size: 12px;
+        }
         .missed-list {
             max-height: 150px;
             overflow-y: auto;
@@ -143,6 +165,15 @@
     <div class="actions">
         <button class="primary-btn" id="analyze-btn">Analyze Current Timeline</button>
         <button class="secondary-btn" id="report-btn">View Performance Report</button>
+    </div>
+
+    <div class="mode-control">
+        <div class="mode-label">Filter aggressiveness</div>
+        <select class="mode-select" id="filter-mode-select">
+            <option value="balanced">Balanced</option>
+            <option value="strict">Strict</option>
+        </select>
+        <div class="hint">Balanced protects likely-good accounts more. Strict catches more reply bait and promo spam.</div>
     </div>
 
     <details>

@@ -17,6 +17,10 @@ class TwitterGuardian {
             { weight: 3, label: 'linkInBio',      re: /link\s*in\s*(my\s*)?bio/i },
             { weight: 3, label: 'youWontBelieve', re: /you\s*(won'?t|will not)\s*believe/i },
             { weight: 3, label: 'engageFarm',     re: /\b(retweet|rt|like|follow)\s+(if|and)\b/i },
+            { weight: 3, label: 'commentForLink', re: /\b(comment|reply)\s+["“']?[\w\s$-]{1,30}["”']?\s+(and\s+)?(i('|’)ll|i will|to)\s+(send|dm|share|drop)\b/i },
+            { weight: 3, label: 'spammyMoneyClaim', re: /\b(earn|made|make|generated|profit)\b.{0,25}\$\s?\d[\d,]*(?:\s*(a|per)\s*(day|week|month))?/i },
+            { weight: 3, label: 'airdropGiveaway', re: /\b(airdrop|giveaway|whitelist|mint\s+live|free\s+mint)\b/i },
+            { weight: 3, label: 'adultPromo',     re: /\b(onlyfans|of leak|nsfw|18\+|content\s*creator)\b/i },
 
             // --- MEDIUM signals (weight 2) ---
             { weight: 2, label: 'doubleShout',    re: /\b[A-Z]{5,}\b.*\b[A-Z]{5,}\b/ },
@@ -28,17 +32,27 @@ class TwitterGuardian {
             { weight: 2, label: 'clickbaitList',  re: /^\d+\s+(ways|things|reasons|signs|tips|tricks|secrets|lessons|mistakes)/i },
             { weight: 2, label: 'cryptoHype',     re: /\b(100x|to the moon|next\s*\w+coin|pumping)\b/i },
             { weight: 2, label: 'rageFraming',    re: /\b(trump|biden|democrat|republican|maga|liberal|conservative)s?\b.{0,60}\b(slam|destroy|shred|humiliat|owned|rekt|expose|demolish)/i },
+            { weight: 2, label: 'replyBait',      re: /\b(drop|comment|reply|type)\s+["“']?[\w$-]{1,20}["”']?\b/i },
+            { weight: 2, label: 'checkReplies',   re: /\b(check|see)\s+(the\s+)?repl(?:y|ies)\b/i },
+            { weight: 2, label: 'joinChannel',    re: /\b(join|dm|message)\s+(my\s+)?(telegram|discord|whatsapp|signal|community)\b/i },
+            { weight: 2, label: 'hustleBait',     re: /\b(dropshipping|faceless|smma|agency\s+owner|clipping\s+business|cashcow|appointment setting)\b/i },
+            { weight: 2, label: 'freeResourceLeadMagnet', re: /\b(free\s+(guide|pdf|template|resource|cheat\s*sheet|course|ebook)|comment\s+[^\n]{0,20}\s+for\s+the\s+link)\b/i },
+            { weight: 2, label: 'replySpamPitch', re: /^@\w{1,20}\s+.{0,80}\b(dm me|link in bio|follow me|join my|check my profile)\b/i },
+            { weight: 2, label: 'fakeAuthority',  re: /\b(i made \$?\d|my students made|clients made|from 0 to \$?\d|guaranteed results?)\b/i },
 
             // --- WEAK signals (weight 1) ---
             { weight: 1, label: 'multiPunct',     re: /[!?]{2,}/ },
             { weight: 1, label: 'bitchAbout',     re: /\b(bitch|whine|cry)\s+about\b/i },
             { weight: 1, label: 'confrontVerb',   re: /\b(shut(?:ting)?\s+down|yelling at|fired back|clap(?:ped|s)?\s+back|destroys?)\b/i },
             { weight: 1, label: 'unbelievable',   re: /\bUNBELIEVABLE\b/ },
+            { weight: 1, label: 'scarcityPitch',  re: /\b(limited spots|last chance|before it closes|don'?t miss|spots filling fast)\b/i },
+            { weight: 1, label: 'ctaEnding',      re: /\b(dm me|follow me|bookmark this|save this post)\b/i },
         ];
 
         // Minimum total weighted score required to auto-train the algorithm.
         // Visual flag still happens at any match (score >= 1).
         this.actionThreshold = 3;
+        this.filterMode = 'balanced';
 
         // Brand/org whitelist — display name must contain one of these to skip filtering.
         this.highValueKeywords = [
@@ -49,6 +63,8 @@ class TwitterGuardian {
 
         // User-editable handle allowlist (loaded from storage in init).
         this.userAllowlist = new Set();
+        this.analyzedTweetIds = new Set();
+        this.hiddenTweetIds = new Set();
 
         this.actionLog = [];
         this.isRunning = false;
@@ -60,7 +76,7 @@ class TwitterGuardian {
             enabled: true,
             autoNotInterested: true,
             autoMarkSpam: false,
-            actionDelay: 1500
+            actionDelay: 1200
         };
 
         // Rate-limiting queue: cap auto-actions at N per WINDOW_MS.
@@ -68,7 +84,7 @@ class TwitterGuardian {
         this.actionQueueBusy = false;
         this.recentActionTimestamps = [];
         this.ACTION_WINDOW_MS = 10_000;
-        this.MAX_ACTIONS_PER_WINDOW = 3;
+        this.MAX_ACTIONS_PER_WINDOW = 4;
 
         this.init();
     }
@@ -92,7 +108,14 @@ class TwitterGuardian {
     async loadPersistedState() {
         return new Promise(resolve => {
             try {
-                chrome.storage.local.get(['guardianAllowlist', 'guardianActionLog', 'guardianMissedClicks'], (data) => {
+                chrome.storage.local.get([
+                    'guardianAllowlist',
+                    'guardianActionLog',
+                    'guardianMissedClicks',
+                    'guardianSettings',
+                    'guardianAnalyzedTweetIds',
+                    'guardianHiddenTweetIds'
+                ], (data) => {
                     if (data.guardianAllowlist && Array.isArray(data.guardianAllowlist)) {
                         this.userAllowlist = new Set(data.guardianAllowlist.map(h => h.toLowerCase().replace(/^@/, '')));
                     }
@@ -102,6 +125,15 @@ class TwitterGuardian {
                     }
                     if (data.guardianMissedClicks && Array.isArray(data.guardianMissedClicks)) {
                         this.missedClicks = data.guardianMissedClicks.slice(-100);
+                    }
+                    if (Array.isArray(data.guardianAnalyzedTweetIds)) {
+                        this.analyzedTweetIds = new Set(data.guardianAnalyzedTweetIds.slice(-3000));
+                    }
+                    if (Array.isArray(data.guardianHiddenTweetIds)) {
+                        this.hiddenTweetIds = new Set(data.guardianHiddenTweetIds.slice(-3000));
+                    }
+                    if (data.guardianSettings?.filterMode === 'strict') {
+                        this.filterMode = 'strict';
                     }
                     resolve();
                 });
@@ -117,6 +149,8 @@ class TwitterGuardian {
             chrome.storage.local.set({
                 guardianActionLog: this.actionLog.slice(-500),
                 guardianMissedClicks: this.missedClicks.slice(-100),
+                guardianAnalyzedTweetIds: Array.from(this.analyzedTweetIds).slice(-3000),
+                guardianHiddenTweetIds: Array.from(this.hiddenTweetIds).slice(-3000),
             });
         } catch (e) {}
     }
@@ -148,10 +182,90 @@ class TwitterGuardian {
             unfollowed: this.actionLog.filter(a => a.action === 'unfollowed').length,
             notInterested: this.actionLog.filter(a => a.action === 'not_interested').length,
             markedSpam: this.actionLog.filter(a => a.action === 'marked_spam').length,
+            actionAttempts: this.actionLog.filter(a => /_attempted$/.test(a.action)).length,
+            actionFailures: this.actionLog.filter(a => /_failed$/.test(a.action)).length,
+            hiddenLocally: this.hiddenTweetIds.size,
             missedClicks: this.missedClicks.length,
             allowlistSize: this.userAllowlist.size,
             reviewQueue: this.reviewQueue.length,
-            algorithmTraining: this.algorithmTraining.enabled
+            algorithmTraining: this.algorithmTraining.enabled,
+            filterMode: this.filterMode
+        };
+    }
+
+    getAutoActionThreshold() {
+        return this.filterMode === 'strict' ? 2 : this.actionThreshold;
+    }
+
+    getActionDelay() {
+        return this.filterMode === 'strict' ? 750 : this.algorithmTraining.actionDelay;
+    }
+
+    getMaxActionsPerWindow() {
+        return this.filterMode === 'strict' ? 6 : this.MAX_ACTIONS_PER_WINDOW;
+    }
+
+    shouldCollapseFlaggedTweet(score, shouldAutoAction) {
+        if (this.filterMode !== 'strict') return false;
+        return score >= 1 || shouldAutoAction;
+    }
+
+    extractTweetIdFromHref(href) {
+        if (!href) return '';
+        const match = href.match(/\/status\/(\d+)/);
+        return match ? match[1] : '';
+    }
+
+    getHighConfidenceLabels() {
+        return new Set([
+            'commentForLink',
+            'spammyMoneyClaim',
+            'airdropGiveaway',
+            'adultPromo',
+            'replyBait',
+            'checkReplies',
+            'joinChannel',
+            'freeResourceLeadMagnet',
+            'replySpamPitch',
+            'fakeAuthority',
+            'spamReply',
+            'lowFollowerPromo',
+            'profileFunnel',
+            'strictPromoBoost',
+            'promoHandle',
+            'suspiciousHandle'
+        ]);
+    }
+
+    getAutoActionDecision(score, matched, context = {}) {
+        const baseThreshold = this.getAutoActionThreshold();
+        const highConfidenceLabels = this.getHighConfidenceLabels();
+        const accountSignals = context.accountSignals || {};
+        const highConfidenceMatches = matched.filter((label) => highConfidenceLabels.has(label));
+        let effectiveThreshold = baseThreshold;
+
+        if (highConfidenceMatches.length >= 2) {
+            effectiveThreshold -= 1;
+        }
+
+        if (matched.includes('spamReply') || matched.includes('lowFollowerPromo')) {
+            effectiveThreshold -= 1;
+        }
+
+        if (accountSignals.isReply && typeof accountSignals.followerCount === 'number' && accountSignals.followerCount < 250) {
+            effectiveThreshold -= 1;
+        }
+
+        if (accountSignals.hasExternalProfileCue && highConfidenceMatches.length > 0) {
+            effectiveThreshold -= 1;
+        }
+
+        effectiveThreshold = Math.max(2, effectiveThreshold);
+
+        return {
+            shouldAutoAction: score >= effectiveThreshold,
+            effectiveThreshold,
+            highConfidenceMatches
         };
     }
 
@@ -197,8 +311,12 @@ class TwitterGuardian {
         };
     }
 
-    analyzeTweet(tweetElement) {
-        if (tweetElement.dataset.guardianAnalyzed) return;
+    analyzeTweet(tweetElement, options = {}) {
+        const force = options.force === true;
+        const suppressMetrics = options.suppressMetrics === true;
+        const ignoreHiddenCache = options.ignoreHiddenCache === true;
+
+        if (!force && tweetElement.dataset.guardianAnalyzed) return;
         tweetElement.dataset.guardianAnalyzed = 'true';
 
         try {
@@ -209,14 +327,31 @@ class TwitterGuardian {
 
             const statusLink = tweetElement.querySelector('a[role="link"][href*="/status/"]');
             let handle = '';
+            let tweetId = '';
             if (statusLink) {
                 const href = statusLink.getAttribute('href') || '';
+                tweetId = this.extractTweetIdFromHref(href);
                 const pathParts = href.split('/').filter(part => part && part !== 'status');
                 handle = pathParts[0] || '';
             }
 
-            this.actionLog.push({ action: 'analyzed', handle, timestamp: new Date().toISOString() });
-            chrome.runtime.sendMessage({ action: 'updateStats', type: 'analyzed' });
+            if (!ignoreHiddenCache && tweetId && this.hiddenTweetIds.has(tweetId)) {
+                this.collapseTweet(tweetElement, 'Hidden by Twitter Guardian', { tweetId, countStats: false });
+                return;
+            }
+            if (!force && tweetId && this.analyzedTweetIds.has(tweetId)) {
+                return;
+            }
+
+            const accountSignals = this.extractAccountSignals(tweetElement, { author, handle, text });
+            if (tweetId) {
+                this.analyzedTweetIds.add(tweetId);
+            }
+
+            if (!suppressMetrics) {
+                this.actionLog.push({ action: 'analyzed', handle, timestamp: new Date().toISOString() });
+                chrome.runtime.sendMessage({ action: 'updateStats', type: 'analyzed' });
+            }
 
             // User allowlist — never filter accounts the user explicitly trusts
             if (handle && this.userAllowlist.has(handle.toLowerCase())) {
@@ -224,17 +359,32 @@ class TwitterGuardian {
                 return;
             }
 
-            // Brand whitelist (by display name)
-            if (this.isHighValueAccount(author, '')) return;
+            // Trust visible verified / large / known accounts before scoring.
+            if (this.isTrustedAccount(author, '', accountSignals)) return;
 
             // Score
             const normalizedText = this.normalizeText(text);
-            const { score, matched } = this.detectSpam(normalizedText);
+            const { score, matched } = this.detectSpam(normalizedText, {
+                handle,
+                author,
+                accountSignals,
+                hasQuotedTweet,
+                hasMedia,
+                isMediaOnly
+            });
 
             if (score === 0) return;
 
             // Visual flag at any match; auto-action only at threshold
-            const shouldAutoAction = score >= this.actionThreshold;
+            const actionDecision = this.getAutoActionDecision(score, matched, {
+                handle,
+                author,
+                accountSignals,
+                hasQuotedTweet,
+                hasMedia,
+                isMediaOnly
+            });
+            const shouldAutoAction = actionDecision.shouldAutoAction;
 
             this.markAsSpam(tweetElement, {
                 handle, text, score, matched,
@@ -242,16 +392,22 @@ class TwitterGuardian {
                 severity: shouldAutoAction ? 'high' : 'low'
             });
 
-            this.actionLog.push({
-                action: 'spam_detected', handle,
-                text: text.substring(0, 120),
-                score, matched,
-                timestamp: new Date().toISOString()
-            });
-            chrome.runtime.sendMessage({ action: 'updateStats', type: 'spam_detected' });
+            if (this.shouldCollapseFlaggedTweet(score, shouldAutoAction)) {
+                this.collapseTweet(tweetElement, 'Low-quality post hidden by Twitter Guardian', { tweetId });
+            }
+
+            if (!suppressMetrics) {
+                this.actionLog.push({
+                    action: 'spam_detected', handle,
+                    text: text.substring(0, 120),
+                    score, matched,
+                    timestamp: new Date().toISOString()
+                });
+                chrome.runtime.sendMessage({ action: 'updateStats', type: 'spam_detected' });
+            }
 
             if (shouldAutoAction && this.algorithmTraining.enabled) {
-                this.enqueueAction(() => this.trainTwitterAlgorithm(tweetElement, score));
+                this.enqueueAction(() => this.trainTwitterAlgorithm(tweetElement, score, tweetId, actionDecision));
             }
 
             this.persistState();
@@ -261,7 +417,7 @@ class TwitterGuardian {
     }
 
     // Weighted scoring: returns {score, matched[]}
-    detectSpam(text) {
+    detectSpam(text, context = {}) {
         let score = 0;
         const matched = [];
         for (const p of this.spamPatterns) {
@@ -270,6 +426,86 @@ class TwitterGuardian {
                 matched.push(p.label);
             }
         }
+        const heuristicSignals = this.getHeuristicSignals(text, context);
+        score += heuristicSignals.score;
+        matched.push(...heuristicSignals.matched);
+        return { score, matched };
+    }
+
+    getHeuristicSignals(text, context = {}) {
+        let score = 0;
+        const matched = [];
+        const handle = (context.handle || '').toLowerCase();
+        const author = (context.author || '').toLowerCase();
+        const accountSignals = context.accountSignals || {};
+        const trimmedText = (text || '').trim();
+        const strictMode = this.filterMode === 'strict';
+
+        const emojiCount = (text.match(/[\p{Extended_Pictographic}]/gu) || []).length;
+        if (emojiCount >= 4) {
+            score += 1;
+            matched.push('emojiHeavy');
+        }
+
+        const hashtagCount = (text.match(/#[\p{L}\p{N}_]+/gu) || []).length;
+        if (hashtagCount >= 4) {
+            score += 1;
+            matched.push('hashtagHeavy');
+        }
+
+        const cashMentions = (text.match(/\$\w+/g) || []).length;
+        if (cashMentions >= 2) {
+            score += 1;
+            matched.push('multiCashtag');
+        }
+
+        if (/\b(free|win|giveaway|airdrop|bet|casino|trade|signals?)\b/i.test(`${handle} ${author}`)) {
+            score += 1;
+            matched.push('promoHandle');
+        }
+
+        if (/[0-9]{4,}$/.test(handle) || /(_|\.)(ai|crypto|alpha|alerts|news|tips)$/.test(handle)) {
+            score += 1;
+            matched.push('suspiciousHandle');
+        }
+
+        if (accountSignals.isReply && /\b(dm me|join|telegram|discord|airdrop|giveaway|follow me|check my profile)\b/i.test(trimmedText)) {
+            score += 2;
+            matched.push('spamReply');
+        }
+
+        if (accountSignals.isReply && /^(?:@\w{1,20}\s+){2,}/.test(trimmedText)) {
+            score += 1;
+            matched.push('multiMentionReply');
+        }
+
+        if (!accountSignals.isVerified && typeof accountSignals.followerCount === 'number' && accountSignals.followerCount < 150) {
+            if (/\b(dm me|link in bio|airdrop|signals?|casino|bet|giveaway|follow for)\b/i.test(trimmedText)) {
+                score += 2;
+                matched.push('lowFollowerPromo');
+            }
+        }
+
+        if (accountSignals.hasExternalProfileCue && /\b(comment|reply|dm me|link in bio|check replies)\b/i.test(trimmedText)) {
+            score += 1;
+            matched.push('profileFunnel');
+        }
+
+        if (context.hasMedia && !text) {
+            score += 1;
+            matched.push('mediaOnlyPromo');
+        }
+
+        if (strictMode && accountSignals.isReply && /^(?:@\w{1,20}\s+)?(agree|facts|this|wow|amazing|insane)\b/i.test(trimmedText)) {
+            score += 1;
+            matched.push('lowValueReply');
+        }
+
+        if (strictMode && /\b(check replies|comment below|reply below|dm me for|link in bio)\b/i.test(trimmedText)) {
+            score += 1;
+            matched.push('strictPromoBoost');
+        }
+
         return { score, matched };
     }
 
@@ -295,9 +531,71 @@ class TwitterGuardian {
         return this.highValueKeywords.some(keyword => textToCheck.includes(keyword));
     }
 
+    isTrustedAccount(author, bio, accountSignals = {}) {
+        if (this.isHighValueAccount(author, bio)) return true;
+        if (this.filterMode === 'strict') return false;
+        if (accountSignals.isVerified) return true;
+        const trustedFollowerFloor = this.filterMode === 'strict' ? 25000 : 10000;
+        if ((accountSignals.followerCount || 0) >= trustedFollowerFloor) return true;
+        return false;
+    }
+
+    extractAccountSignals(tweetElement, { author = '', handle = '', text = '' } = {}) {
+        const userBlock = tweetElement.querySelector('[data-testid="User-Name"]');
+        const lowerText = (text || '').toLowerCase();
+        const signals = {
+            isVerified: false,
+            followerCount: null,
+            isReply: /^@\w{1,20}\b/.test((text || '').trim()),
+            hasExternalProfileCue: false
+        };
+
+        if (userBlock) {
+            const verifiedHint = userBlock.querySelector(
+                '[aria-label*="Verified" i], [title*="Verified" i], [data-testid*="verified" i]'
+            );
+            signals.isVerified = Boolean(verifiedHint);
+
+            const visibleText = userBlock.textContent || '';
+            const followerMatch = visibleText.match(/(\d[\d.,]*\s*[KMB]?)\s+Followers?/i);
+            if (followerMatch) {
+                signals.followerCount = this.parseCompactNumber(followerMatch[1]);
+            }
+        }
+
+        if (/\b(link in bio|newsletter|founder|ceo|engineer|researcher)\b/i.test(`${author} ${lowerText}`)) {
+            signals.hasExternalProfileCue = true;
+        }
+
+        if (!signals.followerCount) {
+            const articleText = tweetElement.textContent || '';
+            const articleFollowerMatch = articleText.match(/(\d[\d.,]*\s*[KMB]?)\s+Followers?/i);
+            if (articleFollowerMatch) {
+                signals.followerCount = this.parseCompactNumber(articleFollowerMatch[1]);
+            }
+        }
+
+        return signals;
+    }
+
+    parseCompactNumber(value) {
+        if (!value) return null;
+        const cleaned = value.replace(/,/g, '').trim();
+        const match = cleaned.match(/^(\d+(?:\.\d+)?)([KMB])?$/i);
+        if (!match) return null;
+
+        const base = Number(match[1]);
+        const suffix = (match[2] || '').toUpperCase();
+        if (suffix === 'K') return Math.round(base * 1_000);
+        if (suffix === 'M') return Math.round(base * 1_000_000);
+        if (suffix === 'B') return Math.round(base * 1_000_000_000);
+        return Math.round(base);
+    }
+
     // --- Visual flag (dark-mode aware via CSS custom properties) ---
     markAsSpam(tweetElement, spamData) {
         const isHigh = spamData.severity === 'high';
+        tweetElement.dataset.guardianFlagged = 'true';
         tweetElement.style.border = `2px solid ${isHigh ? '#ff4444' : '#ffa500'}`;
         tweetElement.style.opacity = isHigh ? '0.35' : '0.7';
         tweetElement.style.position = 'relative';
@@ -343,7 +641,7 @@ class TwitterGuardian {
             // Enforce rate window
             const now = Date.now();
             this.recentActionTimestamps = this.recentActionTimestamps.filter(t => now - t < this.ACTION_WINDOW_MS);
-            if (this.recentActionTimestamps.length >= this.MAX_ACTIONS_PER_WINDOW) {
+            if (this.recentActionTimestamps.length >= this.getMaxActionsPerWindow()) {
                 const waitMs = this.ACTION_WINDOW_MS - (now - this.recentActionTimestamps[0]) + 50;
                 await this.delay(Math.max(waitMs, 500));
                 continue;
@@ -387,13 +685,27 @@ class TwitterGuardian {
                 if (!text) return;
 
                 const normalized = this.normalizeText(text);
-                const { score, matched } = this.detectSpam(normalized);
-                if (score >= this.actionThreshold) return; // We would have caught it
+                const statusLink = article.querySelector('a[role="link"][href*="/status/"]');
+                let handle = '';
+                if (statusLink) {
+                    const href = statusLink.getAttribute('href') || '';
+                    const pathParts = href.split('/').filter(part => part && part !== 'status');
+                    handle = pathParts[0] || '';
+                }
+
+                const authorElement = article.querySelector('[data-testid="User-Name"]');
+                const author = authorElement ? authorElement.textContent.split('@')[0] : '';
+                const accountSignals = this.extractAccountSignals(article, { author, handle, text });
+
+                const { score, matched } = this.detectSpam(normalized, { handle, author, accountSignals });
+                const actionDecision = this.getAutoActionDecision(score, matched, { handle, author, accountSignals });
+                if (actionDecision.shouldAutoAction) return; // We would have caught it
 
                 this.missedClicks.push({
                     text: text.substring(0, 200),
                     ourScore: score,
                     matched,
+                    threshold: actionDecision.effectiveThreshold,
                     timestamp: new Date().toISOString()
                 });
                 console.log('📝 Guardian: recorded a missed tweet you hit "Not interested" on — text:', text.substring(0, 80));
@@ -444,20 +756,38 @@ class TwitterGuardian {
 
     delay(ms) { return new Promise(r => setTimeout(r, ms)); }
 
-    async trainTwitterAlgorithm(tweetElement, spamScore) {
+    async trainTwitterAlgorithm(tweetElement, spamScore, tweetId = '', actionDecision = {}) {
         try {
-            await this.delay(this.algorithmTraining.actionDelay);
+            await this.delay(this.getActionDelay());
             console.log(`🧠 Training Twitter algorithm on spam (score: ${spamScore})...`);
 
             if (spamScore >= 6 && this.algorithmTraining.autoMarkSpam) {
+                this.actionLog.push({
+                    action: 'marked_spam_attempted',
+                    timestamp: new Date().toISOString(),
+                    spamScore,
+                    effectiveThreshold: actionDecision.effectiveThreshold
+                });
+                chrome.runtime.sendMessage({ action: 'updateStats', type: 'marked_spam_attempted' });
                 const success = await this.markTweetAsSpam(tweetElement);
                 if (success) {
+                    this.updateCollapsedPlaceholder(tweetElement, 'Reported as spam', { tweetId });
                     this.actionLog.push({ action: 'marked_spam', timestamp: new Date().toISOString(), spamScore });
                     chrome.runtime.sendMessage({ action: 'updateStats', type: 'marked_spam' });
+                } else {
+                    this.recordActionFailure('marked_spam', 'flow_failed', { spamScore });
                 }
             } else if (this.algorithmTraining.autoNotInterested) {
+                this.actionLog.push({
+                    action: 'not_interested_attempted',
+                    timestamp: new Date().toISOString(),
+                    spamScore,
+                    effectiveThreshold: actionDecision.effectiveThreshold
+                });
+                chrome.runtime.sendMessage({ action: 'updateStats', type: 'not_interested_attempted' });
                 const success = await this.markNotInterested(tweetElement);
                 if (success) {
+                    this.updateCollapsedPlaceholder(tweetElement, 'Hidden and tuned by Twitter Guardian', { tweetId });
                     tweetElement.dataset.guardianFlagged = 'true';
                     this.actionLog.push({ action: 'not_interested', timestamp: new Date().toISOString(), spamScore });
                     chrome.runtime.sendMessage({ action: 'updateStats', type: 'not_interested' });
@@ -471,58 +801,66 @@ class TwitterGuardian {
 
     async markNotInterested(tweetElement) {
         try {
-            const moreButton = tweetElement.querySelector('[aria-label="More"]') ||
-                               tweetElement.querySelector('[data-testid="caret"]');
-            if (!moreButton) return false;
-
-            moreButton.click();
-            await this.delay(800);
-
-            const menu = document.querySelector('[role="menu"]');
-            if (!menu) return false;
+            const menu = await this.openTweetMenu(tweetElement);
+            if (!menu) {
+                this.recordActionFailure('not_interested', 'menu_not_opened');
+                return false;
+            }
 
             const notInterestedOptions = [
                 'Not interested in this Tweet',
                 'Not interested in this post',
                 'Not interested',
-                "I don't like this Tweet"
+                "I don't like this Tweet",
+                'Show fewer posts like this',
+                'See fewer posts like this'
             ];
 
-            for (const optionText of notInterestedOptions) {
-                const option = Array.from(menu.querySelectorAll('[role="menuitem"]'))
-                    .find(el => el.textContent?.includes(optionText));
-                if (option) {
-                    option.click();
-                    await this.delay(500);
-                    await this.selectNotInterestedReason();
-                    return true;
-                }
+            const option = this.findFirstMatchingOption(menu, notInterestedOptions);
+            if (!option) {
+                this.closeOpenMenus();
+                this.recordActionFailure('not_interested', 'menu_option_missing');
+                return false;
             }
 
-            document.body.click();
+            this.triggerClick(option);
+            await this.delay(500);
+            const reasonHandled = await this.selectNotInterestedReason();
+            if (reasonHandled) return true;
+
+            await this.delay(350);
+            if (!document.querySelector('[role="menu"]')) return true;
+
+            this.closeOpenMenus();
+            this.recordActionFailure('not_interested', 'reason_not_selected');
             return false;
         } catch (error) {
             console.log('❌ Mark not interested failed:', error.message);
+            this.recordActionFailure('not_interested', 'exception', { message: error.message });
             return false;
         }
     }
 
     async selectNotInterestedReason() {
         try {
-            await this.delay(300);
+            await this.delay(350);
             const spamReasons = [
-                "It's spam", 'Spam', 'Misleading', "It's suspicious or spam", "This Tweet is suspicious or spam"
+                "It's spam", 'Spam', 'Misleading', "It's suspicious or spam", "This Tweet is suspicious or spam",
+                'This post is suspicious or spam', 'This content is misleading'
             ];
-            const menu = document.querySelector('[role="menu"]');
-            if (!menu) return false;
-            for (const reason of spamReasons) {
-                const reasonOption = Array.from(menu.querySelectorAll('div[role="button"], [role="menuitem"]'))
-                    .find(el => el.textContent?.includes(reason));
-                if (reasonOption) {
-                    reasonOption.click();
-                    await this.delay(300);
-                    return true;
-                }
+
+            const surfaces = [
+                document.querySelector('[role="menu"]'),
+                document.querySelector('[role="dialog"]'),
+                document.body
+            ].filter(Boolean);
+
+            for (const surface of surfaces) {
+                const reasonOption = this.findFirstMatchingOption(surface, spamReasons);
+                if (!reasonOption) continue;
+                this.triggerClick(reasonOption);
+                await this.delay(350);
+                return true;
             }
             return false;
         } catch (error) {
@@ -534,6 +872,117 @@ class TwitterGuardian {
     async markTweetAsSpam(tweetElement) {
         // Still gated by autoMarkSpam=false in safe mode
         return false;
+    }
+
+    collapseTweet(tweetElement, message = 'Hidden', options = {}) {
+        if (!tweetElement || tweetElement.dataset.guardianCollapsed === 'true') return;
+
+        const tweetId = options.tweetId || '';
+        const shouldTrackHide = options.countStats !== false;
+        const isNewHiddenTweet = tweetId ? !this.hiddenTweetIds.has(tweetId) : true;
+
+        if (tweetId) {
+            this.hiddenTweetIds.add(tweetId);
+        }
+        if (shouldTrackHide && isNewHiddenTweet) {
+            chrome.runtime.sendMessage({ action: 'updateStats', type: 'locally_hidden' });
+        }
+
+        tweetElement.dataset.guardianCollapsed = 'true';
+        tweetElement.style.transition = 'opacity 0.25s ease, max-height 0.25s ease, margin 0.25s ease, padding 0.25s ease';
+        tweetElement.style.opacity = '0';
+        tweetElement.style.overflow = 'hidden';
+        tweetElement.style.maxHeight = `${tweetElement.offsetHeight || 120}px`;
+
+        setTimeout(() => {
+            tweetElement.style.maxHeight = '0px';
+            tweetElement.style.margin = '0';
+            tweetElement.style.paddingTop = '0';
+            tweetElement.style.paddingBottom = '0';
+
+            const placeholder = document.createElement('div');
+            placeholder.className = 'guardian-collapsed-placeholder';
+            placeholder.textContent = `🛡️ ${message}`;
+            placeholder.style.cssText = `
+                margin: 8px 0;
+                padding: 8px 12px;
+                border-radius: 8px;
+                background: rgba(47, 62, 86, 0.5);
+                color: #A7A39A;
+                font-size: 12px;
+                font-family: -apple-system, BlinkMacSystemFont, sans-serif;
+            `;
+
+            if (!tweetElement.nextElementSibling?.classList?.contains('guardian-collapsed-placeholder')) {
+                tweetElement.insertAdjacentElement('afterend', placeholder);
+            }
+        }, 50);
+
+        this.persistState();
+    }
+
+    updateCollapsedPlaceholder(tweetElement, message, options = {}) {
+        if (!tweetElement) return;
+        const placeholder = tweetElement.nextElementSibling;
+        if (placeholder?.classList?.contains('guardian-collapsed-placeholder')) {
+            placeholder.textContent = `🛡️ ${message}`;
+            return;
+        }
+        this.collapseTweet(tweetElement, message, options);
+    }
+
+    resetTweetPresentation(tweetElement) {
+        if (!tweetElement) return;
+
+        delete tweetElement.dataset.guardianAnalyzed;
+        delete tweetElement.dataset.guardianCollapsed;
+        delete tweetElement.dataset.guardianFlagged;
+        delete tweetElement.dataset.guardianAllowlisted;
+
+        tweetElement.style.border = '';
+        tweetElement.style.opacity = '';
+        tweetElement.style.position = '';
+        tweetElement.style.transition = '';
+        tweetElement.style.overflow = '';
+        tweetElement.style.maxHeight = '';
+        tweetElement.style.margin = '';
+        tweetElement.style.paddingTop = '';
+        tweetElement.style.paddingBottom = '';
+
+        tweetElement.querySelectorAll('.guardian-warning-badge').forEach((badge) => badge.remove());
+        const placeholder = tweetElement.nextElementSibling;
+        if (placeholder?.classList?.contains('guardian-collapsed-placeholder')) {
+            placeholder.remove();
+        }
+    }
+
+    reprocessTimelineForModeChange(previousMode) {
+        const tweets = Array.from(document.querySelectorAll('article[data-testid="tweet"]'));
+        const tweetIdsOnPage = new Set();
+
+        tweets.forEach((tweetElement) => {
+            const statusLink = tweetElement.querySelector('a[role="link"][href*="/status/"]');
+            const href = statusLink?.getAttribute('href') || '';
+            const tweetId = this.extractTweetIdFromHref(href);
+            if (tweetId) tweetIdsOnPage.add(tweetId);
+            this.resetTweetPresentation(tweetElement);
+        });
+
+        if (previousMode === 'strict' && this.filterMode === 'balanced') {
+            this.hiddenTweetIds = new Set(
+                Array.from(this.hiddenTweetIds).filter((tweetId) => !tweetIdsOnPage.has(tweetId))
+            );
+        }
+
+        tweets.forEach((tweetElement) => {
+            this.analyzeTweet(tweetElement, {
+                force: true,
+                suppressMetrics: true,
+                ignoreHiddenCache: previousMode === 'strict' && this.filterMode === 'balanced'
+            });
+        });
+
+        this.persistState();
     }
 
     // --- Allowlist API called from popup ---
@@ -548,6 +997,89 @@ class TwitterGuardian {
 
     getMissedClicks() {
         return this.missedClicks;
+    }
+
+    setFilterMode(mode) {
+        const nextMode = mode === 'strict' ? 'strict' : 'balanced';
+        const previousMode = this.filterMode;
+        this.filterMode = nextMode;
+        if (previousMode !== nextMode) {
+            this.reprocessTimelineForModeChange(previousMode);
+        }
+    }
+
+    resetPerformanceState() {
+        this.actionLog = [];
+        this.missedClicks = [];
+        this.analyzedTweetIds = new Set();
+        this.hiddenTweetIds = new Set();
+    }
+
+    findMenuOption(menu, label) {
+        const target = (label || '').trim().toLowerCase();
+        return Array.from(menu.querySelectorAll('[role="menuitem"], div[role="button"], button'))
+            .find(el => (el.textContent || '').trim().toLowerCase().includes(target));
+    }
+
+    findFirstMatchingOption(root, labels) {
+        for (const label of labels) {
+            const option = this.findMenuOption(root, label);
+            if (option) return option;
+        }
+        return null;
+    }
+
+    getTweetMenuButton(tweetElement) {
+        return tweetElement.querySelector('[aria-label="More"]') ||
+            tweetElement.querySelector('[data-testid="caret"]') ||
+            tweetElement.querySelector('button[aria-haspopup="menu"]');
+    }
+
+    async openTweetMenu(tweetElement) {
+        const moreButton = this.getTweetMenuButton(tweetElement);
+        if (!moreButton) return null;
+
+        for (let attempt = 0; attempt < 2; attempt += 1) {
+            moreButton.scrollIntoView({ block: 'center', behavior: 'auto' });
+            this.triggerClick(moreButton);
+            const menu = await this.waitForMenu(8, 250);
+            if (menu) return menu;
+            await this.delay(250);
+        }
+
+        return null;
+    }
+
+    closeOpenMenus() {
+        document.body.click();
+        document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+    }
+
+    recordActionFailure(actionName, stage, details = {}) {
+        this.actionLog.push({
+            action: `${actionName}_failed`,
+            stage,
+            timestamp: new Date().toISOString(),
+            ...details
+        });
+        chrome.runtime.sendMessage({ action: 'updateStats', type: `${actionName}_failed` });
+    }
+
+    triggerClick(el) {
+        if (!el) return;
+        el.dispatchEvent(new MouseEvent('pointerdown', { bubbles: true }));
+        el.dispatchEvent(new MouseEvent('mousedown', { bubbles: true }));
+        el.dispatchEvent(new MouseEvent('mouseup', { bubbles: true }));
+        el.click();
+    }
+
+    async waitForMenu(retries = 6, delayMs = 250) {
+        for (let i = 0; i < retries; i += 1) {
+            const menu = document.querySelector('[role="menu"]');
+            if (menu) return menu;
+            await this.delay(delayMs);
+        }
+        return null;
     }
 }
 
@@ -575,6 +1107,16 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     if (request.action === 'setAllowlist') {
         guardian.setAllowlist(request.list || []);
         sendResponse({ success: true, size: guardian.userAllowlist.size });
+        return true;
+    }
+    if (request.action === 'setFilterMode') {
+        guardian.setFilterMode(request.mode);
+        sendResponse({ success: true, mode: guardian.filterMode });
+        return true;
+    }
+    if (request.action === 'resetPerformanceState') {
+        guardian.resetPerformanceState();
+        sendResponse({ success: true });
         return true;
     }
     if (request.action === 'getMissedClicks') {
